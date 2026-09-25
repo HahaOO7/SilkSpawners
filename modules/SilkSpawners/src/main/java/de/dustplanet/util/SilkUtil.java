@@ -44,6 +44,7 @@ import com.sk89q.worldguard.protection.flags.Flags;
 import com.sk89q.worldguard.protection.regions.RegionContainer;
 import com.sk89q.worldguard.protection.regions.RegionQuery;
 import com.vdurmont.semver4j.Semver;
+import com.vdurmont.semver4j.SemverException;
 
 import de.dustplanet.silkspawners.SilkSpawners;
 import de.dustplanet.silkspawners.compat.api.NMSProvider;
@@ -175,7 +176,14 @@ public class SilkUtil {
                 try {
                     final String minecraftVersion = (String) Server.class.getDeclaredMethod("getMinecraftVersion")
                             .invoke(Bukkit.getServer());
-                    final Semver semver = new Semver(minecraftVersion);
+                    final String normalizedVersion = minecraftVersion.matches("^\\d+\\.\\d+$") ? minecraftVersion + ".0" : minecraftVersion;
+                    final Semver semver;
+                    try {
+                        semver = new Semver(normalizedVersion);
+                    } catch (final SemverException e) {
+                        plugin.getLogger().severe("Could not parse the Minecraft version: " + minecraftVersion);
+                        return false;
+                    }
                     if (semver.isGreaterThanOrEqualTo("1.20.5")) {
                         @SuppressWarnings("deprecation")
                         final int protocolVersion = (Integer) UnsafeValues.class.getDeclaredMethod("getProtocolVersion")

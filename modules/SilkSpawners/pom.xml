@@ -279,6 +279,13 @@
           <compilerArgument>-Xlint:all</compilerArgument>
           <showDeprecation>true</showDeprecation>
           <showWarnings>true</showWarnings>
+          <annotationProcessorPaths>
+            <path>
+              <groupId>org.projectlombok</groupId>
+              <artifactId>lombok</artifactId>
+              <version>1.18.48</version>
+            </path>
+          </annotationProcessorPaths>
         </configuration>
       </plugin>
       <plugin>

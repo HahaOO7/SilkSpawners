@@ -1,6 +1,8 @@
 package de.dustplanet.silkspawners.compat.v26_3;
 
 import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -77,6 +79,7 @@ import net.minecraft.world.phys.Vec3;
 
 public class NMSHandler implements NMSProvider {
     private Field tileField;
+    private final Method asBukkitCopy;
     private final Collection<Material> spawnEggs = Arrays.stream(Material.values())
             .filter(material -> material.name().endsWith("_SPAWN_EGG")).collect(Collectors.toList());
 
@@ -85,6 +88,8 @@ public class NMSHandler implements NMSProvider {
     }
 
     public NMSHandler(final boolean checkForNerfFlags) {
+        asBukkitCopy = findAsBukkitCopy();
+
         try {
             tileField = CraftCreatureSpawner.class.getDeclaredField("snapshot");
             tileField.setAccessible(true);
@@ -127,6 +132,33 @@ public class NMSHandler implements NMSProvider {
                     | NoSuchFieldException | SecurityException e) {
                 // Silence
             }
+        }
+    }
+
+    @Nullable
+    private static Method findAsBukkitCopy() {
+        for (final Method method : CraftItemStack.class.getMethods()) {
+            final Class<?>[] parameters = method.getParameterTypes();
+            if ("asBukkitCopy".equals(method.getName()) && parameters.length == 1
+                    && parameters[0].isAssignableFrom(net.minecraft.world.item.ItemStack.class)) {
+                return method;
+            }
+        }
+
+        Bukkit.getLogger().severe("[SilkSpawners] Found no CraftItemStack.asBukkitCopy on this server. "
+                + "Spawner items and spawn eggs will not work.");
+        return null;
+    }
+
+    private ItemStack asBukkitStack(final net.minecraft.world.item.ItemStack nmsStack) {
+        if (asBukkitCopy == null) {
+            throw new IllegalStateException("CraftItemStack.asBukkitCopy is unavailable on this server");
+        }
+
+        try {
+            return (ItemStack) asBukkitCopy.invoke(null, nmsStack);
+        } catch (final IllegalAccessException | InvocationTargetException e) {
+            throw new IllegalStateException("Could not convert " + nmsStack + " into a Bukkit item", e);
         }
     }
 
@@ -252,9 +284,7 @@ public class NMSHandler implements NMSProvider {
             prefixedEntity = entity;
         }
 
-        net.minecraft.world.item.ItemStack itemStack = null;
-        final CraftItemStack craftStack = CraftItemStack.asCraftCopy(item);
-        itemStack = CraftItemStack.asNMSCopy(craftStack);
+        final net.minecraft.world.item.ItemStack itemStack = CraftItemStack.asNMSCopy(item).copy();
         final TypedEntityData<BlockEntityType<?>> blockData = itemStack.get(DataComponents.BLOCK_ENTITY_DATA);
         final CustomData customData = itemStack.getOrDefault(DataComponents.CUSTOM_DATA, CustomData.EMPTY);
         final CompoundTag tag = blockData != null ? blockData.copyTagWithoutId() : new CompoundTag();
@@ -307,15 +337,14 @@ public class NMSHandler implements NMSProvider {
 
         itemStack.set(DataComponents.BLOCK_ENTITY_DATA, TypedEntityData.of(BlockEntityTypes.MOB_SPAWNER, tag));
         itemStack.set(DataComponents.CUSTOM_DATA, CustomData.of(customTag));
-        return CraftItemStack.asCraftMirror(itemStack);
+        return asBukkitStack(itemStack);
     }
 
     @Override
     @Nullable
     public String getSilkSpawnersNBTEntityID(final ItemStack item) {
-        net.minecraft.world.item.ItemStack itemStack = null;
-        final CraftItemStack craftStack = CraftItemStack.asCraftCopy(item);
-        itemStack = CraftItemStack.asNMSCopy(craftStack);
+        // read-only: no copy needed, asNMSCopy's handle is enough to read from
+        final net.minecraft.world.item.ItemStack itemStack = CraftItemStack.asNMSCopy(item);
         final CustomData blockEntityData = itemStack.getOrDefault(DataComponents.CUSTOM_DATA, CustomData.EMPTY);
         final CompoundTag tag = blockEntityData.copyTag();
 
@@ -328,9 +357,7 @@ public class NMSHandler implements NMSProvider {
     @Override
     @Nullable
     public String getVanillaNBTEntityID(final ItemStack item) {
-        net.minecraft.world.item.ItemStack itemStack = null;
-        final CraftItemStack craftStack = CraftItemStack.asCraftCopy(item);
-        itemStack = CraftItemStack.asNMSCopy(craftStack);
+        final net.minecraft.world.item.ItemStack itemStack = CraftItemStack.asNMSCopy(item);
         final TypedEntityData<BlockEntityType<?>> blockEntityData = itemStack.get(DataComponents.BLOCK_ENTITY_DATA);
         if (blockEntityData == null) {
             return null;
@@ -378,9 +405,7 @@ public class NMSHandler implements NMSProvider {
 
     @Override
     public String getOtherPluginsNBTEntityID(final ItemStack item) {
-        net.minecraft.world.item.ItemStack itemStack = null;
-        final CraftItemStack craftStack = CraftItemStack.asCraftCopy(item);
-        itemStack = CraftItemStack.asNMSCopy(craftStack);
+        final net.minecraft.world.item.ItemStack itemStack = CraftItemStack.asNMSCopy(item);
         final TypedEntityData<EntityType<?>> entityData = itemStack.get(DataComponents.ENTITY_DATA);
         if (entityData == null) {
             return null;
@@ -392,13 +417,6 @@ public class NMSHandler implements NMSProvider {
         return null;
     }
 
-    /**
-     * Return the spawner block the player is looking at, or null if isn't.
-     *
-     * @param player the player
-     * @param distance the reach distance
-     * @return the found block or null
-     */
     @Override
     public Block getSpawnerFacing(final Player player, final int distance) {
         final Block block = player.getTargetBlock((Set<Material>) null, distance);
@@ -422,9 +440,8 @@ public class NMSHandler implements NMSProvider {
             itemMeta.setDisplayName(displayName);
             item.setItemMeta(itemMeta);
         }
-        net.minecraft.world.item.ItemStack itemStack = null;
-        final CraftItemStack craftStack = CraftItemStack.asCraftCopy(item);
-        itemStack = CraftItemStack.asNMSCopy(craftStack);
+        // the stack was created here, so editing asNMSCopy's handle in place is safe
+        final net.minecraft.world.item.ItemStack itemStack = CraftItemStack.asNMSCopy(item);
         final TypedEntityData<EntityType<?>> entityData = itemStack.get(DataComponents.ENTITY_DATA);
         final CustomData customData = itemStack.getOrDefault(DataComponents.CUSTOM_DATA, CustomData.EMPTY);
         final CompoundTag tag = entityData != null ? entityData.copyTagWithoutId() : new CompoundTag();
@@ -455,14 +472,12 @@ public class NMSHandler implements NMSProvider {
             itemStack.set(DataComponents.ENTITY_DATA, TypedEntityData.of(entityType.get().value(), tag));
         }
         itemStack.set(DataComponents.CUSTOM_DATA, CustomData.of(customTag));
-        return CraftItemStack.asCraftMirror(itemStack);
+        return asBukkitStack(itemStack);
     }
 
     @Override
     public String getVanillaEggNBTEntityID(final ItemStack item) {
-        net.minecraft.world.item.ItemStack itemStack = null;
-        final CraftItemStack craftStack = CraftItemStack.asCraftCopy(item);
-        itemStack = CraftItemStack.asNMSCopy(craftStack);
+        final net.minecraft.world.item.ItemStack itemStack = CraftItemStack.asNMSCopy(item);
         final TypedEntityData<EntityType<?>> entityData = itemStack.get(DataComponents.ENTITY_DATA);
         if (entityData != null) {
             return EntityType.getKey(entityData.type()).toString().replace("minecraft:", "");
